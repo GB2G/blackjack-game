@@ -1,0 +1,102 @@
+@import "tailwindcss";
+
+@keyframes dealCard {
+  0% {
+    transform: translateX(300px) translateY(-200px) rotate(30deg) scale(0.3);
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(0) translateY(0) rotate(0deg) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes flipCard {
+  0% {
+    transform: rotateY(0deg);
+  }
+  50% {
+    transform: rotateY(90deg);
+  }
+  100% {
+    transform: rotateY(0deg);
+  }
+}
+
+@keyframes chipBounce {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.15);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes slideUp {
+  0% {
+    transform: translateY(30px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 5px rgba(255, 215, 0, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(255, 215, 0, 0.8);
+  }
+}
+
+@keyframes confetti {
+  0% { transform: translateY(0) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(-100px) rotate(720deg); opacity: 0; }
+}
+
+.deal-animation {
+  animation: dealCard 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+}
+
+.flip-animation {
+  animation: flipCard 0.6s ease-in-out forwards;
+}
+
+.chip-bounce {
+  animation: chipBounce 0.3s ease-in-out;
+}
+
+.slide-up {
+  animation: slideUp 0.4s ease-out forwards;
+}
+
+.pulse-glow {
+  animation: pulse-glow 1.5s ease-in-out infinite;
+}
+
+.card-shadow {
+  box-shadow: 2px 3px 10px rgba(0, 0, 0, 0.3);
+}
+
+.felt-bg {
+  background: radial-gradient(ellipse at center, #1a7a3a 0%, #145a2a 50%, #0d4020 100%);
+}
+
+.chip-shadow {
+  box-shadow: 0 4px 8px rgba(0,0,0,0.4), inset 0 2px 4px rgba(255,255,255,0.2);
+}
+
+body {
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+}
