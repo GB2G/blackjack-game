@@ -1,82 +1,87 @@
-import { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { WalletProvider } from "./context/WalletContext";
-import TopBar from "./components/TopBar";
-import LobbyPage from "./pages/LobbyPage";
-import BlackjackGame from "./games/blackjack/BlackjackGame";
-import RouletteGame from "./games/roulette/RouletteGame";
-import SlotsGame from "./games/slots/SlotsGame";
-import BaccaratGame from "./games/baccarat/BaccaratGame";
-import CrapsGame from "./games/craps/CrapsGame";
-import { getGame } from "./lib/games";
+import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { WalletProvider } from './context/WalletContext';
+import TopBar from './components/TopBar';
+import LobbyPage from './pages/LobbyPage';
 
-function getPath() {
-  return window.location.pathname || "/";
+const BlackjackGame = lazy(() => import('./games/blackjack/BlackjackGame'));
+const RouletteGame = lazy(() => import('./games/roulette/RouletteGame'));
+const SlotsGame = lazy(() => import('./games/slots/SlotsGame'));
+const BaccaratGame = lazy(() => import('./games/baccarat/BaccaratGame'));
+const CrapsGame = lazy(() => import('./games/craps/CrapsGame'));
+
+function Loading() {
+  return (
+    <div className="min-h-screen flex items-center justify-center">
+      <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+        className="w-10 h-10 border-2 border-amber-400/30 border-t-amber-400 rounded-full" />
+    </div>
+  );
+}
+
+function GameNotFound({ onNavigate }: { onNavigate: (p: string) => void }) {
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center gap-6">
+      <h2 className="font-display text-4xl font-black text-white/80">Game Not Found</h2>
+      <p className="text-white/40">This game doesn't exist or is coming soon.</p>
+      <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+        onClick={() => onNavigate('/')}
+        className="px-8 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 text-black font-bold shadow-lg shadow-amber-500/20">
+        Back to Lobby
+      </motion.button>
+    </div>
+  );
 }
 
 function GameRouter({ slug, onNavigate }: { slug: string; onNavigate: (p: string) => void }) {
-  const game = getGame(slug);
-  if (!game) return (
-    <div className="text-center py-20">
-      <h2 className="text-2xl font-bold text-gray-400">Game not found</h2>
-      <button onClick={() => onNavigate("/")} className="mt-4 px-6 py-2 rounded-xl bg-white/10 hover:bg-white/20 transition-all">Back to Lobby</button>
-    </div>
-  );
-
-  return (
-    <div>
-      <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
-        <button onClick={() => onNavigate("/")} className="flex items-center gap-2 text-sm text-gray-400 hover:text-white transition-colors">
-          <span>←</span> <span>Back to Lobby</span>
-        </button>
-      </div>
-      {slug === "blackjack" && <BlackjackGame />}
-      {slug === "roulette" && <RouletteGame />}
-      {slug === "slots" && <SlotsGame />}
-      {slug === "baccarat" && <BaccaratGame />}
-      {slug === "craps" && <CrapsGame />}
-    </div>
-  );
+  switch (slug) {
+    case 'blackjack': return <Suspense fallback={<Loading />}><BlackjackGame /></Suspense>;
+    case 'roulette': return <Suspense fallback={<Loading />}><RouletteGame /></Suspense>;
+    case 'slots': return <Suspense fallback={<Loading />}><SlotsGame /></Suspense>;
+    case 'baccarat': return <Suspense fallback={<Loading />}><BaccaratGame /></Suspense>;
+    case 'craps': return <Suspense fallback={<Loading />}><CrapsGame /></Suspense>;
+    default: return <GameNotFound onNavigate={onNavigate} />;
+  }
 }
 
 export function App() {
-  const [path, setPath] = useState(getPath);
+  const [path, setPath] = useState(window.location.pathname);
 
-  useEffect(() => {
-    const handler = () => setPath(getPath());
-    window.addEventListener("popstate", handler);
-    return () => window.removeEventListener("popstate", handler);
+  const navigate = useCallback((newPath: string) => {
+    window.history.pushState({}, '', newPath);
+    setPath(newPath);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
-  const navigate = (p: string) => {
-    window.history.pushState({}, "", p);
-    setPath(p);
-    window.scrollTo(0, 0);
-  };
+  useEffect(() => {
+    const onPop = () => setPath(window.location.pathname);
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
 
-  const slugMatch = path.match(/^\/games\/(.+)$/);
-  const slug = slugMatch ? slugMatch[1] : null;
+  const isGame = path.startsWith('/games/');
+  const slug = isGame ? path.replace('/games/', '').replace(/\/$/, '') : '';
 
   return (
     <WalletProvider>
-      <div className="min-h-screen bg-gray-950 text-white relative overflow-hidden">
+      <div className="min-h-screen bg-[#0a0a0f] text-white relative overflow-hidden">
         {/* Ambient background */}
         <div className="fixed inset-0 pointer-events-none z-0">
-          <div className="absolute top-0 left-1/4 w-96 h-96 rounded-full opacity-5 blur-3xl bg-amber-500" />
-          <div className="absolute bottom-0 right-1/4 w-96 h-96 rounded-full opacity-5 blur-3xl bg-blue-500" />
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full opacity-3 blur-3xl bg-purple-500" />
+          <div className="absolute top-[-20%] left-[-10%] w-[60%] h-[60%] rounded-full bg-amber-500/[0.02] blur-[120px]" />
+          <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] rounded-full bg-blue-500/[0.02] blur-[120px]" />
         </div>
 
         <div className="relative z-10">
-          <TopBar onNavigate={navigate} />
+          <TopBar onNavigate={navigate} currentPath={path} />
           <AnimatePresence mode="wait">
-            <motion.div key={path}
-              initial={{ opacity: 0, y: 12 }}
+            <motion.div
+              key={path}
+              initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -12 }}
-              transition={{ duration: 0.3 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.3, ease: 'easeOut' as const }}
             >
-              {slug ? (
+              {isGame ? (
                 <GameRouter slug={slug} onNavigate={navigate} />
               ) : (
                 <LobbyPage onNavigate={navigate} />

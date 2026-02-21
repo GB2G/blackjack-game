@@ -1,37 +1,37 @@
-import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
 
 interface WalletCtx {
   balance: number;
   add: (n: number) => void;
   subtract: (n: number) => boolean;
-  set: (n: number) => void;
+  setBalance: (n: number) => void;
 }
 
-const Ctx = createContext<WalletCtx>({ balance: 1000, add: () => {}, subtract: () => false, set: () => {} });
+const Ctx = createContext<WalletCtx>({ balance: 1000, add: () => {}, subtract: () => false, setBalance: () => {} });
 
 export function WalletProvider({ children }: { children: ReactNode }) {
-  const [balance, setBalance] = useState(1000);
+  const [balance, setBal] = useState(1000);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    const s = localStorage.getItem("casino_balance");
-    if (s) { const n = parseFloat(s); if (!isNaN(n) && n >= 0) setBalance(n); }
+    const s = localStorage.getItem('casino_balance');
+    if (s) { const n = parseFloat(s); if (!isNaN(n) && n >= 0) setBal(n); }
     setLoaded(true);
   }, []);
 
   useEffect(() => {
-    if (loaded) localStorage.setItem("casino_balance", balance.toString());
+    if (loaded) localStorage.setItem('casino_balance', balance.toString());
   }, [balance, loaded]);
 
-  const add = (n: number) => setBalance(b => Math.round((b + n) * 100) / 100);
+  const add = (n: number) => setBal(p => Math.round((p + n) * 100) / 100);
   const subtract = (n: number) => {
-    if (n > balance) return false;
-    setBalance(b => Math.round((b - n) * 100) / 100);
+    if (balance < n) return false;
+    setBal(p => Math.round((p - n) * 100) / 100);
     return true;
   };
-  const set = (n: number) => setBalance(Math.max(0, Math.round(n * 100) / 100));
+  const setBalance = (n: number) => setBal(Math.max(0, Math.round(n * 100) / 100));
 
-  return <Ctx.Provider value={{ balance, add, subtract, set }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ balance, add, subtract, setBalance }}>{children}</Ctx.Provider>;
 }
 
 export const useWallet = () => useContext(Ctx);

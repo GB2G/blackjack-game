@@ -1,345 +1,409 @@
-import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { useWallet } from "../../context/WalletContext";
+import { useState, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { useWallet } from '../../context/WalletContext';
 
-type Phase = "betting" | "comeOut" | "point" | "rolling" | "resolved";
-interface CrapsBet { type: string; amount: number; point?: number; odds?: number; }
+type CrapsPhase = 'comeOut' | 'point' | 'rolling' | 'resolved';
+type BetKind = 'pass' | 'dontPass' | 'come' | 'dontCome' | 'passOdds' | 'dontPassOdds' | 'comeOdds' | 'dontComeOdds';
+
+interface CrapsBet {
+  kind: BetKind;
+  amount: number;
+  point?: number; // for come/dontCome that have traveled
+}
 
 function rollDice(): [number, number] {
   return [Math.floor(Math.random() * 6) + 1, Math.floor(Math.random() * 6) + 1];
 }
 
-function oddsPayoutPass(point: number, oddsAmt: number): number {
-  if (point === 4 || point === 10) return oddsAmt * 2;
-  if (point === 5 || point === 9) return oddsAmt * 1.5;
-  if (point === 6 || point === 8) return oddsAmt * 1.2;
-  return 0;
+function oddsPayoutPass(point: number, amount: number): number {
+  if (point === 4 || point === 10) return amount * 2;
+  if (point === 5 || point === 9) return amount * 1.5;
+  if (point === 6 || point === 8) return amount * 1.2;
+  return amount;
 }
 
-function oddsPayoutDont(point: number, oddsAmt: number): number {
-  if (point === 4 || point === 10) return oddsAmt * 0.5;
-  if (point === 5 || point === 9) return oddsAmt * (2 / 3);
-  if (point === 6 || point === 8) return oddsAmt * (5 / 6);
-  return 0;
+function oddsPayoutDont(point: number, amount: number): number {
+  if (point === 4 || point === 10) return amount * 0.5;
+  if (point === 5 || point === 9) return amount * (2 / 3);
+  if (point === 6 || point === 8) return amount * (5 / 6);
+  return amount;
 }
 
-function DieComp({ value, rolling }: { value: number; rolling: boolean }) {
-  const dots: Record<number, string[]> = {
-    1: ["col-start-2 row-start-2"],
-    2: ["col-start-3 row-start-1", "col-start-1 row-start-3"],
-    3: ["col-start-3 row-start-1", "col-start-2 row-start-2", "col-start-1 row-start-3"],
-    4: ["col-start-1 row-start-1", "col-start-3 row-start-1", "col-start-1 row-start-3", "col-start-3 row-start-3"],
-    5: ["col-start-1 row-start-1", "col-start-3 row-start-1", "col-start-2 row-start-2", "col-start-1 row-start-3", "col-start-3 row-start-3"],
-    6: ["col-start-1 row-start-1", "col-start-3 row-start-1", "col-start-1 row-start-2", "col-start-3 row-start-2", "col-start-1 row-start-3", "col-start-3 row-start-3"],
+const POINT_NUMS = [4, 5, 6, 8, 9, 10];
+
+function DiceView({ values, rolling }: { values: [number, number]; rolling: boolean }) {
+  const dots = (n: number) => {
+    const positions: Record<number, [number, number][]> = {
+      1: [[1, 1]], 2: [[0, 2], [2, 0]], 3: [[0, 2], [1, 1], [2, 0]],
+      4: [[0, 0], [0, 2], [2, 0], [2, 2]], 5: [[0, 0], [0, 2], [1, 1], [2, 0], [2, 2]],
+      6: [[0, 0], [0, 2], [1, 0], [1, 2], [2, 0], [2, 2]],
+    };
+    return (
+      <div className="grid grid-cols-3 grid-rows-3 gap-0.5 w-12 h-12 sm:w-16 sm:h-16 p-1.5 sm:p-2">
+        {Array.from({ length: 9 }, (_, i) => {
+          const r = Math.floor(i / 3), c = i % 3;
+          const show = positions[n]?.some(([pr, pc]) => pr === r && pc === c);
+          return <div key={i} className={`rounded-full ${show ? 'bg-white' : ''}`} />;
+        })}
+      </div>
+    );
   };
+
   return (
-    <motion.div
-      animate={rolling ? { rotate: [0, 90, 180, 270, 360], scale: [1, 1.1, 0.9, 1.1, 1] } : { rotate: 0, scale: 1 }}
-      transition={rolling ? { duration: 0.6, repeat: Infinity } : { duration: 0.3 }}
-      className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl bg-white grid grid-cols-3 grid-rows-3 p-2 gap-0.5"
-    >
-      {(dots[value] || []).map((cls, i) => (
-        <div key={i} className={`w-3 h-3 sm:w-3.5 sm:h-3.5 rounded-full bg-gray-900 ${cls}`} />
+    <div className="flex gap-3 justify-center">
+      {values.map((v, i) => (
+        <motion.div key={i}
+          animate={rolling ? { rotate: [0, 360, 720], scale: [1, 0.8, 1] } : { rotate: 0, scale: 1 }}
+          transition={{ duration: rolling ? 0.6 : 0.3, ease: 'easeOut' as const }}
+          className="w-14 h-14 sm:w-18 sm:h-18 rounded-xl bg-white shadow-lg shadow-white/10 flex items-center justify-center"
+        >
+          {dots(v)}
+        </motion.div>
       ))}
-    </motion.div>
+    </div>
   );
 }
 
 export default function CrapsGame() {
-  const wallet = useWallet();
-  const [phase, setPhase] = useState<Phase>("betting");
+  const { balance, add, subtract } = useWallet();
+  const [, setPhase] = useState<CrapsPhase>('comeOut');
   const [dice, setDice] = useState<[number, number]>([3, 4]);
   const [rolling, setRolling] = useState(false);
   const [tablePoint, setTablePoint] = useState<number | null>(null);
   const [bets, setBets] = useState<CrapsBet[]>([]);
-  const [chipVal, setChipVal] = useState(10);
-  const [msg, setMsg] = useState("");
-  const [lastWin, setLastWin] = useState(0);
-  const [history, setHistory] = useState<number[]>([]);
+  const [chipValue, setChipValue] = useState(10);
+  const [message, setMessage] = useState('Place Pass or Don\'t Pass bet to start');
+  const [lastResults, setLastResults] = useState<number[]>([]);
+  const [roundWinnings, setRoundWinnings] = useState(0);
 
-  const total = dice[0] + dice[1];
-  const hasBet = (type: string) => bets.find(b => b.type === type);
+  const hasBet = (kind: BetKind) => bets.some(b => b.kind === kind);
+  const getBet = (kind: BetKind) => bets.find(b => b.kind === kind);
 
-  function placeBet(type: string) {
+  const placeBet = useCallback((kind: BetKind) => {
     if (rolling) return;
-    if (chipVal > wallet.balance) return;
-    // Validate phase
-    if ((type === "pass" || type === "dontpass") && tablePoint !== null) return;
-    if ((type === "come" || type === "dontcome") && tablePoint === null) return;
-    if (!wallet.subtract(chipVal)) return;
+    // Validate bet placement
+    if (kind === 'pass' || kind === 'dontPass') {
+      if (tablePoint !== null) return; // Only on comeOut
+    }
+    if (kind === 'come' || kind === 'dontCome') {
+      if (tablePoint === null) return; // Only during point phase
+    }
+    if (kind === 'passOdds' || kind === 'dontPassOdds') {
+      if (tablePoint === null) return;
+      if (kind === 'passOdds' && !hasBet('pass')) return;
+      if (kind === 'dontPassOdds' && !hasBet('dontPass')) return;
+    }
+    if (kind === 'comeOdds' || kind === 'dontComeOdds') {
+      // Must have a come/dontCome bet with a point
+      const parent = kind === 'comeOdds' ? 'come' : 'dontCome';
+      const parentBet = bets.find(b => b.kind === parent && b.point !== undefined);
+      if (!parentBet) return;
+    }
+
+    if (chipValue > balance) return;
+    if (!subtract(chipValue)) return;
 
     setBets(prev => {
-      const ex = prev.findIndex(b => b.type === type && !b.point);
-      if (ex >= 0) {
-        const u = [...prev];
-        u[ex] = { ...u[ex], amount: u[ex].amount + chipVal };
-        return u;
+      const existing = prev.findIndex(b => b.kind === kind && (kind !== 'come' && kind !== 'dontCome'));
+      if (existing >= 0) {
+        const updated = [...prev];
+        updated[existing] = { ...updated[existing], amount: updated[existing].amount + chipValue };
+        return updated;
       }
-      return [...prev, { type, amount: chipVal }];
+      return [...prev, { kind, amount: chipValue }];
     });
-    if (phase === "betting") setPhase("comeOut");
-  }
+  }, [rolling, tablePoint, chipValue, balance, subtract, bets]);
 
-  function addOdds(betIndex: number) {
+  const roll = useCallback(() => {
     if (rolling) return;
-    const bet = bets[betIndex];
-    if (!bet || !bet.point) return;
-    const maxOdds = bet.amount * 3;
-    const currentOdds = bet.odds || 0;
-    const toAdd = Math.min(chipVal, maxOdds - currentOdds);
-    if (toAdd <= 0 || toAdd > wallet.balance) return;
-    if (!wallet.subtract(toAdd)) return;
-    const u = [...bets];
-    u[betIndex] = { ...u[betIndex], odds: currentOdds + toAdd };
-    setBets(u);
-  }
+    const hasAnyBet = bets.length > 0;
+    if (!hasAnyBet) { setMessage('Place a bet first!'); return; }
 
-  function roll() {
-    if (bets.length === 0 || rolling) return;
     setRolling(true);
-    setMsg("");
-    setLastWin(0);
+    setRoundWinnings(0);
+    const newDice = rollDice();
 
     setTimeout(() => {
-      const d = rollDice();
-      setDice(d);
+      setDice(newDice);
       setRolling(false);
-      const sum = d[0] + d[1];
-      setHistory(h => [sum, ...h.slice(0, 9)]);
-      resolveRoll(sum);
-    }, 800);
-  }
+      const total = newDice[0] + newDice[1];
+      setLastResults(prev => [total, ...prev.slice(0, 14)]);
 
-  function resolveRoll(sum: number) {
-    let newBets = [...bets];
-    let totalWin = 0;
-    const removals: number[] = [];
+      let winnings = 0;
+      const newBets: CrapsBet[] = [];
+      let newPoint = tablePoint;
+      let msg = `Rolled ${total}`;
 
-    if (tablePoint === null) {
-      // Come-out roll for pass/dontpass
-      newBets = newBets.map((bet, i) => {
-        if (bet.type === "pass") {
-          if (sum === 7 || sum === 11) { totalWin += bet.amount * 2; removals.push(i); setMsg("Pass wins! 🎉"); }
-          else if (sum === 2 || sum === 3 || sum === 12) { removals.push(i); setMsg("Craps! Pass loses"); }
-          else { setTablePoint(sum); setPhase("point"); setMsg(`Point is ${sum}`); return { ...bet, point: sum }; }
+      if (tablePoint === null) {
+        // COME-OUT ROLL
+        if (total === 7 || total === 11) {
+          msg = `${total}! Pass wins!`;
+          bets.forEach(b => {
+            if (b.kind === 'pass') { winnings += b.amount * 2; }
+            else if (b.kind === 'dontPass') { /* loses */ }
+            else newBets.push(b);
+          });
+        } else if (total === 2 || total === 3) {
+          msg = `${total}! Don't Pass wins!`;
+          bets.forEach(b => {
+            if (b.kind === 'dontPass') { winnings += b.amount * 2; }
+            else if (b.kind === 'pass') { /* loses */ }
+            else newBets.push(b);
+          });
+        } else if (total === 12) {
+          msg = `12! Pass loses, Don't Pass pushes`;
+          bets.forEach(b => {
+            if (b.kind === 'dontPass') { winnings += b.amount; } // push
+            else if (b.kind === 'pass') { /* loses */ }
+            else newBets.push(b);
+          });
+        } else {
+          // Point established
+          newPoint = total;
+          msg = `Point is ${total}!`;
+          bets.forEach(b => newBets.push(b));
         }
-        if (bet.type === "dontpass") {
-          if (sum === 2 || sum === 3) { totalWin += bet.amount * 2; removals.push(i); setMsg("Don't Pass wins!"); }
-          else if (sum === 7 || sum === 11) { removals.push(i); setMsg("Don't Pass loses"); }
-          else if (sum === 12) { totalWin += bet.amount; removals.push(i); setMsg("Bar 12 — Push"); }
-          else { setTablePoint(sum); setPhase("point"); setMsg(`Point is ${sum}`); return { ...bet, point: sum }; }
-        }
-        return bet;
-      });
-    } else {
-      // Point phase
-      newBets = newBets.map((bet, i) => {
-        // Pass line with point
-        if (bet.type === "pass" && bet.point) {
-          if (sum === bet.point) {
-            totalWin += bet.amount * 2;
-            if (bet.odds) totalWin += bet.odds + oddsPayoutPass(bet.point, bet.odds);
-            removals.push(i);
-            setMsg(`Hit the point ${sum}! Pass wins! 🎉`);
-            setTablePoint(null); setPhase("comeOut");
-          } else if (sum === 7) {
-            removals.push(i);
-            setMsg("Seven out! Pass loses");
-            setTablePoint(null); setPhase("comeOut");
+      } else {
+        // POINT PHASE
+        bets.forEach(b => {
+          if (b.kind === 'pass') {
+            if (total === tablePoint) { winnings += b.amount * 2; msg = `${total}! Point hit! Pass wins!`; }
+            else if (total === 7) { msg = `Seven out! Pass loses`; }
+            else newBets.push(b);
+          } else if (b.kind === 'dontPass') {
+            if (total === 7) { winnings += b.amount * 2; msg = `Seven out! Don't Pass wins!`; }
+            else if (total === tablePoint) { /* loses */ }
+            else newBets.push(b);
+          } else if (b.kind === 'passOdds') {
+            if (total === tablePoint) { winnings += b.amount + oddsPayoutPass(tablePoint, b.amount); }
+            else if (total === 7) { /* loses */ }
+            else newBets.push(b);
+          } else if (b.kind === 'dontPassOdds') {
+            if (total === 7) { winnings += b.amount + oddsPayoutDont(tablePoint, b.amount); }
+            else if (total === tablePoint) { /* loses */ }
+            else newBets.push(b);
+          } else if (b.kind === 'come') {
+            if (b.point === undefined) {
+              // Come bet not yet traveled
+              if (total === 7 || total === 11) { winnings += b.amount * 2; }
+              else if (total === 2 || total === 3 || total === 12) { /* loses */ }
+              else { newBets.push({ ...b, point: total }); }
+            } else {
+              // Come bet with point
+              if (total === b.point) { winnings += b.amount * 2; }
+              else if (total === 7) { /* loses */ }
+              else newBets.push(b);
+            }
+          } else if (b.kind === 'dontCome') {
+            if (b.point === undefined) {
+              if (total === 2 || total === 3) { winnings += b.amount * 2; }
+              else if (total === 7 || total === 11) { /* loses */ }
+              else if (total === 12) { winnings += b.amount; } // push
+              else { newBets.push({ ...b, point: total }); }
+            } else {
+              if (total === 7) { winnings += b.amount * 2; }
+              else if (total === b.point) { /* loses */ }
+              else newBets.push(b);
+            }
+          } else if (b.kind === 'comeOdds') {
+            const comeBet = bets.find(cb => cb.kind === 'come' && cb.point !== undefined);
+            if (comeBet && comeBet.point) {
+              if (total === comeBet.point) { winnings += b.amount + oddsPayoutPass(comeBet.point, b.amount); }
+              else if (total === 7) { /* loses */ }
+              else newBets.push(b);
+            } else newBets.push(b);
+          } else if (b.kind === 'dontComeOdds') {
+            const dcBet = bets.find(cb => cb.kind === 'dontCome' && cb.point !== undefined);
+            if (dcBet && dcBet.point) {
+              if (total === 7) { winnings += b.amount + oddsPayoutDont(dcBet.point, b.amount); }
+              else if (total === dcBet.point) { /* loses */ }
+              else newBets.push(b);
+            } else newBets.push(b);
+          } else {
+            newBets.push(b);
           }
-        }
-        // Don't pass with point
-        if (bet.type === "dontpass" && bet.point) {
-          if (sum === 7) {
-            totalWin += bet.amount * 2;
-            if (bet.odds) totalWin += bet.odds + oddsPayoutDont(bet.point, bet.odds);
-            removals.push(i);
-            setMsg("Seven out! Don't Pass wins!");
-            setTablePoint(null); setPhase("comeOut");
-          } else if (sum === bet.point) {
-            removals.push(i);
-            setMsg(`Point ${sum} hit — Don't Pass loses`);
-            setTablePoint(null); setPhase("comeOut");
-          }
-        }
-        // Come bet (no point yet for this bet)
-        if (bet.type === "come" && !bet.point) {
-          if (sum === 7 || sum === 11) { totalWin += bet.amount * 2; removals.push(i); }
-          else if (sum === 2 || sum === 3 || sum === 12) { removals.push(i); }
-          else { return { ...bet, point: sum }; }
-        }
-        // Come bet with point
-        if (bet.type === "come" && bet.point) {
-          if (sum === bet.point) {
-            totalWin += bet.amount * 2;
-            if (bet.odds) totalWin += bet.odds + oddsPayoutPass(bet.point, bet.odds);
-            removals.push(i);
-          } else if (sum === 7) {
-            removals.push(i);
-          }
-        }
-        // Don't come (no point)
-        if (bet.type === "dontcome" && !bet.point) {
-          if (sum === 2 || sum === 3) { totalWin += bet.amount * 2; removals.push(i); }
-          else if (sum === 7 || sum === 11) { removals.push(i); }
-          else if (sum === 12) { totalWin += bet.amount; removals.push(i); } // push
-          else { return { ...bet, point: sum }; }
-        }
-        // Don't come with point
-        if (bet.type === "dontcome" && bet.point) {
-          if (sum === 7) {
-            totalWin += bet.amount * 2;
-            if (bet.odds) totalWin += bet.odds + oddsPayoutDont(bet.point, bet.odds);
-            removals.push(i);
-          } else if (sum === bet.point) {
-            removals.push(i);
-          }
-        }
-        return bet;
-      });
-
-      // If seven out, clear all come/dontcome bets too
-      if (sum === 7) {
-        newBets.forEach((bet, i) => {
-          if (bet.type === "come" && bet.point && !removals.includes(i)) removals.push(i);
         });
+
+        // Check if point was hit or seven-out
+        if (total === tablePoint || total === 7) {
+          newPoint = null;
+        }
       }
-    }
 
-    if (totalWin > 0) {
-      wallet.add(Math.round(totalWin * 100) / 100);
-      setLastWin(Math.round(totalWin * 100) / 100);
-    }
+      if (winnings > 0) {
+        add(winnings);
+        setRoundWinnings(winnings);
+      }
+      setTablePoint(newPoint);
+      setBets(newBets);
+      setMessage(msg);
+      setPhase(newPoint !== null ? 'point' : 'comeOut');
+    }, 800);
+  }, [rolling, bets, tablePoint, add]);
 
-    // Remove resolved bets
-    const finalBets = newBets.filter((_, i) => !removals.includes(i));
-    setBets(finalBets);
-    if (finalBets.length === 0 && !tablePoint) setPhase("betting");
-  }
-
-  const betAreaClass = (active: boolean, disabled: boolean) =>
-    `p-3 sm:p-4 rounded-xl border-2 transition-all cursor-pointer text-center font-bold text-sm ${
-      disabled ? "opacity-30 cursor-not-allowed" :
-      active ? "border-amber-400/50 bg-amber-500/10" : "border-white/10 bg-white/5 hover:border-white/30 hover:bg-white/10"
-    }`;
+  const chips = [5, 10, 25, 100, 500];
+  const canPlacePass = tablePoint === null && !rolling;
+  const canPlaceCome = tablePoint !== null && !rolling;
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-6">
-      <motion.h1 initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }}
-        className="text-3xl sm:text-4xl font-black text-center mb-6 bg-gradient-to-r from-red-400 to-red-600 bg-clip-text text-transparent">
-        CRAPS
+    <div className="min-h-screen flex flex-col items-center px-4 py-6">
+      <motion.h1 initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="font-display text-3xl sm:text-4xl font-black text-red-400 mb-2">
+        🎲 Craps
       </motion.h1>
 
-      {/* Point indicator */}
-      <div className="flex justify-center gap-2 mb-6">
-        {[4, 5, 6, 8, 9, 10].map(n => (
-          <div key={n} className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold border-2 transition-all
-            ${tablePoint === n ? "border-amber-400 bg-amber-500/20 text-amber-400 scale-110" : "border-white/10 bg-white/5 text-gray-500"}`}>
-            {n}
-          </div>
-        ))}
-        <div className={`ml-2 px-3 py-2 rounded-full text-xs font-bold ${tablePoint ? "bg-green-500/20 text-green-400 border border-green-500/30" : "bg-gray-800 text-gray-500 border border-white/10"}`}>
-          {tablePoint ? "ON" : "OFF"}
+      {/* Point Indicator */}
+      <div className="flex items-center gap-3 mb-4">
+        <div className={`px-4 py-1.5 rounded-full font-bold text-sm ${tablePoint ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-white/5 text-white/30 border border-white/10'}`}>
+          {tablePoint ? `ON — Point: ${tablePoint}` : 'OFF — Come Out'}
         </div>
       </div>
 
-      {/* Table + Dice */}
-      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
-        className="rounded-2xl border border-white/10 p-4 sm:p-6 mb-6"
-        style={{ background: "linear-gradient(135deg, #1a0505, #2a0a0a, #1a0505)" }}>
+      {/* Message */}
+      <AnimatePresence mode="wait">
+        <motion.div key={message} initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+          className="glass rounded-xl px-6 py-2 mb-4 text-center">
+          <span className="font-semibold text-white/90">{message}</span>
+          {roundWinnings > 0 && <span className="text-green-400 font-bold ml-2">+${roundWinnings.toFixed(2)}</span>}
+        </motion.div>
+      </AnimatePresence>
 
-        {/* Dice */}
-        <div className="flex justify-center gap-4 mb-6">
-          <DieComp value={dice[0]} rolling={rolling} />
-          <DieComp value={dice[1]} rolling={rolling} />
-        </div>
-
-        {/* Sum + Message */}
-        {!rolling && (
-          <div className="text-center mb-4">
-            <div className="text-2xl font-black text-white">{total}</div>
-          </div>
-        )}
-        <AnimatePresence>
-          {msg && (
-            <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ opacity: 0 }}
-              className="text-center py-3 mb-4 rounded-xl bg-black/40 border border-amber-500/30 text-amber-400 font-bold">{msg}</motion.div>
-          )}
-        </AnimatePresence>
-
-        {lastWin > 0 && (
-          <div className="text-center text-green-400 font-bold mb-4">Won ${lastWin.toFixed(2)}</div>
-        )}
-
-        {/* Betting areas */}
-        <div className="grid grid-cols-2 gap-3 mb-4">
-          <div onClick={() => !tablePoint && placeBet("pass")}
-            className={betAreaClass(!!hasBet("pass"), !!tablePoint)}>
-            PASS LINE
-            {hasBet("pass") && <div className="text-amber-400 text-xs mt-1">${hasBet("pass")!.amount}</div>}
-          </div>
-          <div onClick={() => !tablePoint && placeBet("dontpass")}
-            className={betAreaClass(!!hasBet("dontpass"), !!tablePoint)}>
-            DON'T PASS
-            {hasBet("dontpass") && <div className="text-amber-400 text-xs mt-1">${hasBet("dontpass")!.amount}</div>}
-          </div>
-          <div onClick={() => tablePoint !== null && placeBet("come")}
-            className={betAreaClass(!!hasBet("come"), !tablePoint)}>
-            COME
-            {bets.filter(b => b.type === "come").map((b, i) => (
-              <div key={i} className="text-amber-400 text-xs">${b.amount}{b.point ? ` → ${b.point}` : ""}</div>
-            ))}
-          </div>
-          <div onClick={() => tablePoint !== null && placeBet("dontcome")}
-            className={betAreaClass(!!hasBet("dontcome"), !tablePoint)}>
-            DON'T COME
-            {bets.filter(b => b.type === "dontcome").map((b, i) => (
-              <div key={i} className="text-amber-400 text-xs">${b.amount}{b.point ? ` → ${b.point}` : ""}</div>
-            ))}
-          </div>
-        </div>
-
-        {/* Odds buttons */}
-        {bets.some(b => b.point) && (
-          <div className="mb-4 space-y-2">
-            <div className="text-xs text-gray-400 text-center">Add Odds (max 3× bet)</div>
-            <div className="flex flex-wrap gap-2 justify-center">
-              {bets.map((bet, i) => bet.point ? (
-                <button key={i} onClick={() => addOdds(i)}
-                  className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-xs hover:bg-white/10 transition-all">
-                  {bet.type} {bet.point} odds {bet.odds ? `($${bet.odds})` : ""}
-                </button>
-              ) : null)}
-            </div>
-          </div>
-        )}
-      </motion.div>
-
-      {/* Chip selector */}
-      <div className="flex flex-wrap justify-center gap-2 mb-4">
-        {[5, 10, 25, 100, 500].map(v => (
-          <button key={v} onClick={() => setChipVal(v)}
-            className={`w-12 h-12 rounded-full font-bold text-xs border-2 transition-all ${chipVal === v ? "border-red-400 bg-red-500/20 text-red-400 scale-110" : "border-white/20 bg-white/5 text-gray-300 hover:border-white/40"}`}>${v}</button>
-        ))}
-      </div>
-
-      {/* Roll button */}
-      <div className="text-center mb-4">
-        <motion.button whileTap={{ scale: 0.95 }} onClick={roll} disabled={bets.length === 0 || rolling}
-          className="px-12 py-4 rounded-2xl bg-gradient-to-r from-red-500 to-red-600 text-white font-black text-xl hover:brightness-110 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
-          {rolling ? "Rolling..." : "🎲 ROLL"}
-        </motion.button>
+      {/* Dice */}
+      <div className="mb-6">
+        <DiceView values={dice} rolling={rolling} />
+        <div className="text-center mt-2 text-white/40 text-sm">Total: {dice[0] + dice[1]}</div>
       </div>
 
       {/* History */}
-      {history.length > 0 && (
-        <div className="flex gap-1.5 justify-center flex-wrap">
-          {history.map((h, i) => (
-            <div key={i} className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border border-white/10
-              ${h === 7 ? "bg-red-600" : h === 11 ? "bg-green-600" : [2,3,12].includes(h) ? "bg-gray-700" : "bg-white/10"}`}>{h}</div>
+      {lastResults.length > 0 && (
+        <div className="flex gap-1.5 mb-6 flex-wrap justify-center max-w-sm">
+          {lastResults.map((n, i) => (
+            <div key={i} className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${n === 7 ? 'bg-red-500 text-white' : POINT_NUMS.includes(n) ? 'bg-amber-500 text-black' : 'bg-white/10 text-white/60'}`}>
+              {n}
+            </div>
           ))}
         </div>
       )}
+
+      <div className="w-full max-w-4xl flex flex-col lg:flex-row gap-6">
+        {/* Betting Areas */}
+        <div className="flex-1 glass-strong rounded-2xl p-4 sm:p-6 space-y-3">
+          <h3 className="text-white/40 text-xs font-semibold uppercase tracking-wider mb-3">Betting Areas</h3>
+
+          {/* Pass / Don't Pass */}
+          <div className="grid grid-cols-2 gap-3">
+            <motion.button whileTap={{ scale: 0.95 }} onClick={() => placeBet('pass')}
+              disabled={!canPlacePass}
+              className={`p-4 rounded-xl text-center transition-all ${hasBet('pass') ? 'bg-green-600/30 ring-1 ring-green-400/50' : 'bg-white/5 hover:bg-white/10'} disabled:opacity-30 disabled:cursor-not-allowed`}>
+              <div className="text-green-400 font-bold">Pass Line</div>
+              <div className="text-white/40 text-xs">1:1</div>
+              {getBet('pass') && <div className="text-amber-400 text-sm font-bold mt-1">${getBet('pass')!.amount}</div>}
+            </motion.button>
+            <motion.button whileTap={{ scale: 0.95 }} onClick={() => placeBet('dontPass')}
+              disabled={!canPlacePass}
+              className={`p-4 rounded-xl text-center transition-all ${hasBet('dontPass') ? 'bg-red-600/30 ring-1 ring-red-400/50' : 'bg-white/5 hover:bg-white/10'} disabled:opacity-30 disabled:cursor-not-allowed`}>
+              <div className="text-red-400 font-bold">Don't Pass</div>
+              <div className="text-white/40 text-xs">1:1 (bar 12)</div>
+              {getBet('dontPass') && <div className="text-amber-400 text-sm font-bold mt-1">${getBet('dontPass')!.amount}</div>}
+            </motion.button>
+          </div>
+
+          {/* Come / Don't Come */}
+          <div className="grid grid-cols-2 gap-3">
+            <motion.button whileTap={{ scale: 0.95 }} onClick={() => placeBet('come')}
+              disabled={!canPlaceCome}
+              className={`p-4 rounded-xl text-center transition-all ${hasBet('come') ? 'bg-blue-600/30 ring-1 ring-blue-400/50' : 'bg-white/5 hover:bg-white/10'} disabled:opacity-30 disabled:cursor-not-allowed`}>
+              <div className="text-blue-400 font-bold">Come</div>
+              <div className="text-white/40 text-xs">1:1</div>
+              {getBet('come') && <div className="text-amber-400 text-sm font-bold mt-1">${getBet('come')!.amount}{getBet('come')!.point ? ` → ${getBet('come')!.point}` : ''}</div>}
+            </motion.button>
+            <motion.button whileTap={{ scale: 0.95 }} onClick={() => placeBet('dontCome')}
+              disabled={!canPlaceCome}
+              className={`p-4 rounded-xl text-center transition-all ${hasBet('dontCome') ? 'bg-orange-600/30 ring-1 ring-orange-400/50' : 'bg-white/5 hover:bg-white/10'} disabled:opacity-30 disabled:cursor-not-allowed`}>
+              <div className="text-orange-400 font-bold">Don't Come</div>
+              <div className="text-white/40 text-xs">1:1 (bar 12)</div>
+              {getBet('dontCome') && <div className="text-amber-400 text-sm font-bold mt-1">${getBet('dontCome')!.amount}{getBet('dontCome')!.point ? ` → ${getBet('dontCome')!.point}` : ''}</div>}
+            </motion.button>
+          </div>
+
+          {/* Odds */}
+          {tablePoint && (
+            <div className="grid grid-cols-2 gap-3">
+              {hasBet('pass') && (
+                <motion.button whileTap={{ scale: 0.95 }} onClick={() => placeBet('passOdds')}
+                  className={`p-3 rounded-xl text-center transition-all ${hasBet('passOdds') ? 'bg-green-600/20 ring-1 ring-green-400/30' : 'bg-white/5 hover:bg-white/10'}`}>
+                  <div className="text-green-300 font-semibold text-sm">Pass Odds</div>
+                  <div className="text-white/30 text-xs">True odds</div>
+                  {getBet('passOdds') && <div className="text-amber-400 text-xs font-bold mt-1">${getBet('passOdds')!.amount}</div>}
+                </motion.button>
+              )}
+              {hasBet('dontPass') && (
+                <motion.button whileTap={{ scale: 0.95 }} onClick={() => placeBet('dontPassOdds')}
+                  className={`p-3 rounded-xl text-center transition-all ${hasBet('dontPassOdds') ? 'bg-red-600/20 ring-1 ring-red-400/30' : 'bg-white/5 hover:bg-white/10'}`}>
+                  <div className="text-red-300 font-semibold text-sm">Don't Pass Odds</div>
+                  <div className="text-white/30 text-xs">True odds</div>
+                  {getBet('dontPassOdds') && <div className="text-amber-400 text-xs font-bold mt-1">${getBet('dontPassOdds')!.amount}</div>}
+                </motion.button>
+              )}
+            </div>
+          )}
+
+          {/* Point Numbers Display */}
+          <div className="grid grid-cols-6 gap-2 mt-2">
+            {POINT_NUMS.map(n => (
+              <div key={n} className={`py-2 rounded-lg text-center text-sm font-bold ${n === tablePoint ? 'bg-amber-500/20 text-amber-400 ring-1 ring-amber-400/50' : 'bg-white/5 text-white/20'}`}>
+                {n}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Right Panel — Chip Selector + Roll */}
+        <div className="w-full lg:w-64 space-y-4">
+          {/* Chips */}
+          <div className="glass rounded-xl p-4">
+            <div className="text-white/40 text-xs font-semibold uppercase tracking-wider mb-3">Select Chip</div>
+            <div className="flex flex-wrap gap-2 justify-center">
+              {chips.map(v => (
+                <motion.button key={v} whileTap={{ scale: 0.9 }}
+                  onClick={() => setChipValue(v)}
+                  className={`w-12 h-12 rounded-full font-bold text-xs border-2 transition-all ${chipValue === v ? 'border-red-400 bg-red-400/20 text-red-300 shadow-lg shadow-red-500/20' : 'border-white/10 bg-white/5 text-white/50 hover:border-white/30'}`}>
+                  ${v}
+                </motion.button>
+              ))}
+            </div>
+          </div>
+
+          {/* Active Bets */}
+          {bets.length > 0 && (
+            <div className="glass rounded-xl p-4">
+              <div className="text-white/40 text-xs font-semibold uppercase tracking-wider mb-2">Active Bets</div>
+              <div className="space-y-1">
+                {bets.map((b, i) => (
+                  <div key={i} className="flex justify-between text-sm">
+                    <span className="text-white/60">{b.kind}{b.point ? ` (${b.point})` : ''}</span>
+                    <span className="text-amber-400 font-bold">${b.amount}</span>
+                  </div>
+                ))}
+                <div className="border-t border-white/10 pt-1 mt-1 flex justify-between">
+                  <span className="text-white/40 text-sm">Total</span>
+                  <span className="text-amber-400 font-bold">${bets.reduce((s, b) => s + b.amount, 0)}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Roll Button */}
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={roll}
+            disabled={rolling || bets.length === 0}
+            className="w-full py-4 rounded-xl bg-gradient-to-r from-red-500 to-red-700 text-white font-black text-xl shadow-lg shadow-red-500/25 disabled:opacity-30 disabled:cursor-not-allowed hover:shadow-red-500/40 transition-shadow"
+          >
+            {rolling ? '🎲 Rolling...' : '🎲 ROLL'}
+          </motion.button>
+        </div>
+      </div>
     </div>
   );
 }
